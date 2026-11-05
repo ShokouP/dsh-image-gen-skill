@@ -11,7 +11,7 @@ if (-not (Test-Path (Join-Path $src 'SKILL.md'))) { throw "在 $src 下找不到
 
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Copy-Item -Path (Join-Path $src 'SKILL.md') -Destination $dest -Force
-foreach ($sub in 'scripts', 'references') {
+foreach ($sub in 'scripts', 'references', 'assets') {
   $from = Join-Path $src $sub
   if (Test-Path $from) {
     Copy-Item -Path $from -Destination $dest -Recurse -Force

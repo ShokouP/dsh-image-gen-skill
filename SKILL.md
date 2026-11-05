@@ -55,10 +55,24 @@ node "<skill>/scripts/gen-image.mjs" --prompt-file .\tmp\p.txt --aspect 9:16 --o
 
 | provider | 文生图 | 改图/编辑 | 透明背景 | 速度 | 成本 | 水印 |
 |---|---|---|---|---|---|---|
-| `minimax` | ✅ | ❌ | ❌ | ~15s | 套餐内 | 无 |
-| `dashscope` | ✅ | ✅ Qwen-Image | ❌ | ~7s / 90–250s | 按张 | 无 |
-| `zhipu` | ✅ | ❌ | ❌ | ~10s | 免费 | **有「AI生成」** |
-| `ark` (Seedream) | ✅ | ✅ Flash/Pro | ✅ 仅 Pro 编辑 | ~10s / ~28s | Flash ~0.12 元/张 | 无 |
+| `minimax` | ✅ | ❌ | ❌ | ~15–20s | 套餐内 | 无 |
+| `dashscope` | ✅ | ✅ Qwen-Image | ❌ | 10–70s（万相 10s、Qwen 15–105s） | 按张 | 无 |
+| `zhipu` | ✅ | ❌ | ❌ | ~8s | 免费 | **有「AI生成」** |
+| `ark`（Seedream 5.0 / 4.x） | ✅ | ✅ 5.0/4.x | ✅ 仅 5.0 | 4–75s | Flash ~0.12 元/张 | 无 |
+
+## 模型清单（每个都实测调用通过）
+
+| 模式 | 可用模型 |
+|---|---|
+| 文生图 | `minimax/image-01`；`dashscope/wan2.2-t2i-flash`、`wanx2.1-t2i-turbo`、`qwen-image-3.0`、`qwen-image-3.0-pro`、`qwen-image-2.1-turbo`；`zhipu/cogview-3-flash`；`ark/5-0-flash-260915`、`5-0-pro-260628`、`4-0-250828`、`4-0-20260415`、`4-5-251128` |
+| 改图/编辑 | `ark/5-0-flash`、`5-0-pro`、`4-0-250828`、`4-5-251128`；`dashscope/qwen-image-3.0`、`3.0-pro`、`2.1-pro`、`2.1-turbo` |
+| 透明背景 | `ark/5-0-flash-260915`、`5-0-pro-260628`（需带 alpha 的 PNG 输入） |
+
+约束与例外：
+- `ark/doubao-seedream-4-5-251128` **只支持 `size:"2K"`**（传 1K 会 400），脚本已自动特判；它也不支持透明背景。
+- Qwen-Image 系列输出固定 2048²、PNG 4–6MB，尺寸不可控；最慢 `qwen-image-3.0-pro` 编辑约 103s。
+- `zhipu/cogview-4`、`glm-image` 本机 key 无付费额度（429 `code=1113`），不要选；`cogview-3-flash` 免费但有水印。
+- 想自己复核这台机器上所有模型是否可调：`node "<skill>/scripts/gen-image.mjs" --verify all`（逐条真实调用，按张计费；`--verify fast` 只跑每个 provider 的核心路径）。
 
 - 文生图 `auto`：MiniMax → 万相 → 智谱 → Seedream Flash（失败自动切下一个）。
 - 改图 `auto`：Seedream Flash → Qwen-Image（Qwen 编辑较慢，90–250s，脚本对编辑路径默认给到 300s 超时）。

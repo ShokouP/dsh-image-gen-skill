@@ -87,3 +87,63 @@
 | Seedream Pro / 透明背景 | 180s（实测 74–75s） |
 | Qwen-Image 编辑 | 300s（实测 90–250s） |
 
+---
+
+# v3 全模型可调用性矩阵（2026-11-05，27 次真实调用）
+
+结论：**22/25 组合可用**，不可用的 3 条全部是「额度/能力不支持」，**没有鉴权失败或模型不存在**。
+
+## 文生图（11 个模型可用）
+
+| provider | model | 结果 | 耗时 | 产物 |
+|---|---|---|---|---|
+| minimax | image-01 | ✅ | 20.1s | 1024² jpeg |
+| dashscope | wan2.2-t2i-flash | ✅ 异步 | 10.8s | 1024² png |
+| dashscope | wanx2.1-t2i-turbo | ✅ 异步 | 13.6s | 1024² png |
+| dashscope | qwen-image-3.0 | ✅ multimodal | 58.7s | 2048² png |
+| dashscope | qwen-image-3.0-pro | ✅ | 70.3s | 2048² png |
+| dashscope | qwen-image-2.1-turbo | ✅ 最快 Qwen | 15.1s | 2736×1536 png |
+| zhipu | cogview-3-flash | ✅ 带水印 | 8.1s | 1024² jpeg |
+| ark | 5-0-flash-260915 | ✅ | 8.4s | 1024² jpeg |
+| ark | 5-0-pro-260628 | ✅ | 17.5s | 1152×864 jpeg |
+| ark | 4-0-250828 | ✅ | 4.0s | 1152×864 jpeg |
+| ark | 4-0-20260415 | ✅ | 5.7s | 1024² jpeg |
+| ark | 4-5-251128 | ✅ 仅 2K | 0.4s→重试 6.8s | 2048² jpeg |
+
+不可用：`zhipu/cogview-4`、`zhipu/glm-image` → 429 `{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}`
+（同 key 的 cogview-3-flash 正常 → 是付费额度问题，不是鉴权）。`ark/4-5` 传 `size:"1K"` → 400 `InvalidParameter: size not supported for model doubao-seedream-4-5`。
+
+## 编辑（8 个模型可用）
+
+| provider | model | 耗时 |
+|---|---|---|
+| ark | 5-0-flash-260915 | 8.1s |
+| ark | 5-0-pro-260628 | 56.6s |
+| ark | 4-0-250828 | 5.0s |
+| ark | 4-5-251128（2K） | 14.0s |
+| dashscope | qwen-image-3.0 | 47.4s |
+| dashscope | qwen-image-3.0-pro | **103.3s（最慢）** |
+| dashscope | qwen-image-2.1-pro | 33.2s |
+| dashscope | qwen-image-2.1-turbo | 14.2s |
+
+## 透明背景（2 个模型可用）
+
+| provider | model | 耗时 | alpha 校验 |
+|---|---|---|---|
+| ark | 5-0-flash-260915 | 9.1s | RGBA，68.9% 像素 alpha=0，四角全透明，3.02MB |
+| ark | 5-0-pro-260628 | 68.4s | RGBA，72.6% 像素 alpha=0，四角全透明，4.23MB |
+| ark | 4-5-251128 | ❌ | `InvalidParameter: The parameter 'output_format' is not supported by the current model` |
+
+## 自检命令
+
+```powershell
+node "<skill>/scripts/gen-image.mjs" --verify fast   # 每 provider 一条核心路径（7 次）
+node "<skill>/scripts/gen-image.mjs" --verify all    # 上面 22 条完整矩阵
+node "<skill>/scripts/gen-image.mjs" --verify all --dry-run  # 只看矩阵不调用
+```
+
+`verify` 输出 `{ ok, total, passed, failed, results[] }`，每条含 provider/model/mode/HTTP 结果/耗时/产物路径/错误原文。
+
+本机 2026-11-05 15:47–15:57 跑 `--verify all`：**22/22 通过，642s**（Slowest: ark pro transparent 91.6s、qwen-3.0-pro edit 80.3s、ark pro edit 71.2s；4-5 的 t2i/edit 均自动走 2K 通过）。
+
+

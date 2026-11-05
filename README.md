@@ -18,12 +18,24 @@ DSH 的 skill 只是一份磁盘上的说明 + 资源文件（`<DSH_HOME>/skills
 
 ## 支持的 provider（均本机实测）
 
-| provider | 文生图 | 改图/编辑 | 透明背景 | 速度 | 参考成本 | 水印 |
-|---|---|---|---|---|---|---|
-| 火山方舟 `ark`（Seedream 5.0 Flash / Pro） | ✅ | ✅ | ✅ 仅 Pro | 10s / 28–75s | Flash ≈0.12 元/张 | 无 |
-| 阿里通义 `dashscope`（万相 / Qwen-Image） | ✅ | ✅ Qwen-Image | ❌ | 7s / 90–250s | 按张 | 无 |
-| MiniMax `minimax`（image-01） | ✅ | ❌ | ❌ | ~15s | 套餐内 | 无 |
-| 智谱 `zhipu`（CogView-3-Flash） | ✅ | ❌ | ❌ | ~10s | 免费 | **有「AI生成」** |
+| provider | 可用模型 | 文生图 | 改图 | 透明 | 速度 | 参考成本 | 水印 |
+|---|---|---|---|---|---|---|---|
+| 火山方舟 `ark` | Seedream `5-0-flash-260915` / `5-0-pro-260628` / `4-0-250828` / `4-0-20260415` / `4-5-251128` | ✅ | ✅ | ✅ 仅 5.0 | 4–75s | Flash ≈0.12 元/张 | 无 |
+| 阿里 `dashscope` | `wan2.2-t2i-flash`、`wanx2.1-t2i-turbo`、`qwen-image-3.0` / `3.0-pro` / `2.1-pro` / `2.1-turbo` | ✅ | ✅ Qwen-Image | ❌ | 10–105s | 按张 | 无 |
+| MiniMax `minimax` | `image-01` | ✅ | ❌ | ❌ | ~15–20s | 套餐内 | 无 |
+| 智谱 `zhipu` | `cogview-3-flash` | ✅ | ❌ | ❌ | ~8s | 免费 | **有「AI生成」** |
+
+**22/25 组合已逐条真实调用验证通过**（矩阵见 [references/providers.md](references/providers.md)）。真正不可用的只有：
+`zhipu/cogview-4`、`zhipu/glm-image`（本机 key 无付费额度，429 `code=1113`）、`ark/4-5` 的透明背景（模型不支持）。
+`ark/4-5-251128` 只支持 `size:"2K"`，脚本已自动特判。
+
+自己复核这台机器：
+
+```powershell
+node "<skill>/scripts/gen-image.mjs" --verify fast   # 每家一条核心路径（7 次调用）
+node "<skill>/scripts/gen-image.mjs" --verify all    # 22 条完整矩阵（按张计费）
+node "<skill>/scripts/gen-image.mjs" --verify all --dry-run  # 只看矩阵，不花钱
+```
 
 按能力自动降级：文生图 `MiniMax → 万相 → 智谱 → Seedream`；改图 `Seedream → Qwen-Image`；
 `--quality high` 用 Seedream Flash（2K 画质最好），`--quality best` 用 Seedream Pro。
@@ -76,6 +88,7 @@ node "<skill>/scripts/gen-image.mjs" --list
 | `--provider minimax\|dashscope\|zhipu\|ark` | 强制单一通道 |
 | `--out` `--name` `--timeout` `--retries` | 输出目录 / 文件名前缀 / 超时 / 重试 |
 | `--list` `--dry-run` | 可用性检查 / 只打印请求 |
+| `--verify [fast\|all]` | 全模型可调用性自检（真实调用；`fast` 7 次 / `all` 22 次） |
 
 ### 输出契约
 

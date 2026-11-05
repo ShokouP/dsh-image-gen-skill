@@ -71,41 +71,44 @@ const PROVIDERS = {
     id: 'dashscope',
     label: '阿里通义 Qwen-Image / 万相',
     keyRef: 'QWEN_TOKEN_PLAN_CN_API_KEY',
-    models: ['wan2.2-t2i-flash', 'wanx2.1-t2i-turbo'],
+    models: ['wan2.2-t2i-flash', 'wanx2.1-t2i-turbo', 'qwen-image-3.0', 'qwen-image-3.0-pro', 'qwen-image-2.1-pro', 'qwen-image-2.1-turbo'],
     defaultModel: 'wan2.2-t2i-flash',
     editModel: DASHSCOPE_EDIT_MODEL,
     editModels: ['qwen-image-3.0', 'qwen-image-3.0-pro', 'qwen-image-2.1-pro', 'qwen-image-2.1-turbo'],
+    notes: ['qwen-image-* 走 multimodal-generation 端点，文生图/编辑均可用；输出固定 2048²，尺寸不可控', 'wan* 走 text2image 异步端点'],
     watermark: false,
     edit: true,
     transparent: false,
     cost: '按张计费（百炼控制台）',
-    speed: '~7s（文生图）/ ~20s（编辑）',
+    speed: '~7s（万相）/ 15–105s（Qwen-Image）',
     endpoint: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis',
   },
   zhipu: {
     id: 'zhipu',
     label: '智谱 CogView-3-Flash（免费档）',
     keyRef: 'ZAI_CODING_CN_API_KEY',
-    models: ['cogview-3-flash'],
+    models: ['cogview-3-flash', 'cogview-4', 'glm-image'],
     defaultModel: 'cogview-3-flash',
+    notes: ['cogview-4 / glm-image 需要资源包，本机 key 无额度（429 code=1113），默认只用免费的 cogview-3-flash'],
     watermark: true,
     edit: false,
     transparent: false,
     cost: '免费，但右下角固定「AI生成」水印',
-    speed: '~10s',
+    speed: '~8s',
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/images/generations',
   },
   ark: {
     id: 'ark',
-    label: '火山方舟 Seedream 5.0',
+    label: '火山方舟 Seedream 5.0 / 4.x',
     keyRef: 'ARK_API_KEY',
-    models: ['doubao-seedream-5-0-flash-260915', 'doubao-seedream-5-0-pro-260628'],
+    models: ['doubao-seedream-5-0-flash-260915', 'doubao-seedream-5-0-pro-260628', 'doubao-seedream-4-0-250828', 'doubao-seedream-4-0-20260415', 'doubao-seedream-4-5-251128'],
     defaultModel: ARK_MODELS_FALLBACK.flash,
+    notes: ['4-5-251128 只支持 size:"2K"（传 1K 会 400），且不支持透明背景', 'transparent 仅 5.0 flash/pro 支持，需带 alpha 的 PNG 输入'],
     watermark: false,
     edit: true,
     transparent: true,
     cost: 'Flash ~0.12 元/张，Pro 更贵更慢',
-    speed: '~10s（Flash）/ ~28s（Pro）',
+    speed: '~8s（Flash）/ 17–75s（Pro）/ 4–7s（4.x）',
     endpoint: 'https://ark.cn-beijing.volces.com/api/v3/images/generations',
   },
 };
@@ -117,6 +120,7 @@ const USAGE = `DSH 生图 / 改图 CLI（用本机已存 API 凭证）
   node gen-image.mjs --prompt "把背景换成雪天" --image in.jpg   # 图生图/编辑
   node gen-image.mjs --prompt-file p.txt [选项]
   node gen-image.mjs --list
+  node gen-image.mjs --verify [fast|all]                 # 全模型可调用性自检
 
 选项:
   --prompt <text>        提示词；含引号/换行/中文建议改用 --prompt-file
@@ -124,7 +128,7 @@ const USAGE = `DSH 生图 / 改图 CLI（用本机已存 API 凭证）
   --image <path>         参考图/待编辑图，可重复最多 ${MAX_IMAGES} 张；给了即进入编辑模式
   --aspect <a>           画面比例：${ASPECTS.join(' | ')}（默认 1:1）
   --size <WxH>           显式尺寸，覆盖 --aspect（如 2048x2048）
-  --transparent          透明背景（仅 ark/Seedream Pro 编辑路径；必须同时给 --image）
+  --transparent          透明背景（仅 ark 编辑路径；必须同时给带 alpha 的 PNG）
   --count <n>            生成张数 ${DEFAULTS.count}-${MAX_IMAGES}，串行（默认 1）
   --provider <id>        minimax | dashscope | zhipu | ark（默认 auto 按链回退）
   --quality <q>          auto（默认，MiniMax 优先）| high（Seedream Flash 优先）
@@ -135,6 +139,8 @@ const USAGE = `DSH 生图 / 改图 CLI（用本机已存 API 凭证）
   --timeout <ms>         单次请求超时（默认 180000）
   --retries <n>          网络/5xx 重试次数（默认 1）
   --list                 列出 provider、能力、凭证可用性与 Ark 可用模型，不出图
+  --verify [fast|all]    逐模型真实自检可调用性：fast=每个 provider 一条核心路径，
+                         all=完整矩阵（文生图/编辑/透明，按张计费）
   --dry-run              只打印将要发出的请求，不调用 API
   --help                 显示本帮助
 
@@ -198,7 +204,16 @@ function parseArgs(argv) {
       val = key.slice(eq + 1);
       key = key.slice(0, eq);
     }
-    const booleans = new Set(['help', 'list', 'dry-run', 'transparent', 'version']);
+    if (key === 'verify') {
+      const next = argv[i + 1];
+      if (val === undefined && (next === 'fast' || next === 'all')) {
+        i += 1;
+        val = next;
+      }
+      opts.verify = val === undefined ? true : val;
+      continue;
+    }
+    const booleans = new Set(['help', 'list', 'dry-run', 'transparent', 'version', 'verify']);
     if (val === undefined && !booleans.has(key)) {
       val = argv[++i];
       if (val === undefined) throw new UsageError(`--${key} 缺少值`);
@@ -425,6 +440,11 @@ async function minimaxGenerate(ctx) {
 }
 
 async function dashscopeGenerate(ctx) {
+  // qwen-image 系列走原生 multimodal 端点（纯文本 content 即文生图）
+  if (/^qwen-image/i.test(ctx.model || '')) {
+    const out = await dashscopeMultimodal(ctx, false);
+    return { ...out, kind: out.kind };
+  }
   const { prompt, key, model, timeoutMs } = ctx;
   const size = ctx.size ? `${ctx.size.w}*${ctx.size.h}` : SIZE_MAP.dashscope[ctx.aspect] || '1024*1024';
   const submit = await httpJson('https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis', {
@@ -463,17 +483,19 @@ async function dashscopeGenerate(ctx) {
   providerError('dashscope', null, `轮询超时（${timeoutMs}ms）`);
 }
 
-async function dashscopeEdit(ctx) {
+async function dashscopeMultimodal(ctx, withImages) {
   const { prompt, key, timeoutMs } = ctx;
   const model = ctx.model || PROVIDERS.dashscope.editModel;
-  const content = [...ctx.images.map((i) => ({ image: i.dataUrl })), { text: prompt }];
+  const content = [...(withImages ? ctx.images.map((i) => ({ image: i.dataUrl })) : []), { text: prompt }];
+  const parameters = {};
+  if (ctx.size) parameters.size = `${ctx.size.w}*${ctx.size.h}`;
   const res = await httpJson('https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, input: { messages: [{ role: 'user', content }] }, parameters: {} }),
+    body: JSON.stringify({ model, input: { messages: [{ role: 'user', content }] }, parameters }),
     timeoutMs,
   });
-  assertOk('dashscope', res, '编辑');
+  assertOk('dashscope', res, withImages ? '编辑' : '生成');
   const parts = res.json?.output?.choices?.[0]?.message?.content || [];
   const url = parts.map((c) => c.image).filter(Boolean)[0];
   if (!url) providerError('dashscope', res, '响应里没有图片');
@@ -532,7 +554,14 @@ async function arkGenerate(ctx) {
   const { prompt, key, quality, timeoutMs, images } = ctx;
   const preferPro = quality === 'best' || Boolean(ctx.model && /-pro-/.test(ctx.model));
   const model = ctx.model || (await pickArkModel(key, preferPro, timeoutMs));
-  const preferredSize = ctx.size ? `${ctx.size.w}x${ctx.size.h}` : SIZE_MAP.ark[ctx.aspect] || '2K';
+  const is45 = /4-5/i.test(model);
+  if (is45 && ctx.transparent) {
+    const err = new Error('ark: doubao-seedream-4-5 不支持透明背景（仅 5.0 flash/pro 支持）');
+    Object.assign(err, { kind: 'bad_request', status: 400, code: 'NotSupported' });
+    throw err;
+  }
+  // 4.5 只认 2K 档；其余按显式 size 或比例映射
+  const preferredSize = is45 ? '2K' : ctx.size ? `${ctx.size.w}x${ctx.size.h}` : SIZE_MAP.ark[ctx.aspect] || '2K';
   const attempt = async (size, transparent) => {
     const body = { model, prompt, size, response_format: 'url', watermark: false };
     if (images.length) body.image = images.map((i) => i.dataUrl);
@@ -569,9 +598,35 @@ async function arkGenerate(ctx) {
 
 PROVIDERS.minimax.generate = minimaxGenerate;
 PROVIDERS.dashscope.generate = dashscopeGenerate;
-PROVIDERS.dashscope.editGenerate = dashscopeEdit;
+PROVIDERS.dashscope.editGenerate = (ctx) => dashscopeMultimodal(ctx, true);
 PROVIDERS.zhipu.generate = zhipuGenerate;
 PROVIDERS.ark.generate = arkGenerate;
+
+// 可调用性自检矩阵：provider × model × 模式
+const VERIFY_MATRIX = [
+  { provider: 'minimax', model: 'image-01', mode: 't2i', core: true },
+  { provider: 'dashscope', model: 'wan2.2-t2i-flash', mode: 't2i', core: true },
+  { provider: 'dashscope', model: 'wanx2.1-t2i-turbo', mode: 't2i' },
+  { provider: 'dashscope', model: 'qwen-image-3.0', mode: 't2i' },
+  { provider: 'dashscope', model: 'qwen-image-3.0-pro', mode: 't2i' },
+  { provider: 'dashscope', model: 'qwen-image-2.1-turbo', mode: 't2i' },
+  { provider: 'zhipu', model: 'cogview-3-flash', mode: 't2i', core: true },
+  { provider: 'ark', model: ARK_MODELS_FALLBACK.flash, mode: 't2i', core: true },
+  { provider: 'ark', model: ARK_MODELS_FALLBACK.pro, mode: 't2i' },
+  { provider: 'ark', model: 'doubao-seedream-4-5-251128', mode: 't2i' },
+  { provider: 'ark', model: 'doubao-seedream-4-0-250828', mode: 't2i' },
+  { provider: 'ark', model: 'doubao-seedream-4-0-20260415', mode: 't2i' },
+  { provider: 'ark', model: ARK_MODELS_FALLBACK.flash, mode: 'edit', core: true },
+  { provider: 'ark', model: ARK_MODELS_FALLBACK.pro, mode: 'edit' },
+  { provider: 'ark', model: 'doubao-seedream-4-5-251128', mode: 'edit' },
+  { provider: 'ark', model: 'doubao-seedream-4-0-250828', mode: 'edit' },
+  { provider: 'dashscope', model: 'qwen-image-3.0', mode: 'edit', core: true },
+  { provider: 'dashscope', model: 'qwen-image-3.0-pro', mode: 'edit' },
+  { provider: 'dashscope', model: 'qwen-image-2.1-pro', mode: 'edit' },
+  { provider: 'dashscope', model: 'qwen-image-2.1-turbo', mode: 'edit' },
+  { provider: 'ark', model: ARK_MODELS_FALLBACK.flash, mode: 'transparent', core: true },
+  { provider: 'ark', model: ARK_MODELS_FALLBACK.pro, mode: 'transparent' },
+];
 
 // ---------------------------------------------------------------- chain / run
 
@@ -804,6 +859,79 @@ async function runGenerate(cfg) {
   };
 }
 
+async function runVerify(cfg) {
+  const scope = cfg.verifyScope === 'all' ? 'all' : 'fast';
+  const matrix = scope === 'all' ? VERIFY_MATRIX : VERIFY_MATRIX.filter((e) => e.core);
+  if (cfg.dryRun) {
+    return {
+      ok: true,
+      dryRun: true,
+      verifyScope: scope,
+      total: matrix.length,
+      matrix,
+      hint: 'dry-run：只列出矩阵，未发起任何请求、未产生费用',
+    };
+  }
+  const verifyAsset = path.join(SKILL_DIR, 'assets', 'verify-input.png');
+  const results = [];
+  const startedAt = Date.now();
+
+  for (const entry of matrix) {
+    let images = [];
+    if (entry.mode !== 't2i') {
+      try {
+        images = loadInputImages([verifyAsset]);
+      } catch (e) {
+        results.push({ provider: entry.provider, model: entry.model, mode: entry.mode, ok: false, error: `缺少自检素材: ${e.message}` });
+        continue;
+      }
+    }
+    const sub = {
+      ...cfg,
+      prompt:
+        entry.mode === 't2i'
+          ? 'a red apple on a wooden table'
+          : 'keep the subject unchanged, replace the background with a snowy field',
+      provider: entry.provider,
+      model: entry.model,
+      images,
+      transparent: entry.mode === 'transparent',
+      size: null, // 让各 provider 用默认尺寸（qwen 系尺寸不可控，Ark 4.5 只认 2K）
+      count: 1,
+      name: `verify-${entry.provider}`,
+      dryRun: false,
+      timeoutExplicit: false,
+      retries: 0,
+    };
+    const t0 = Date.now();
+    const r = await generateOne(sub, 0);
+    results.push({
+      provider: entry.provider,
+      model: entry.model,
+      mode: entry.mode,
+      ok: Boolean(r.ok),
+      ms: r.ok ? r.ms : Date.now() - t0,
+      width: r.width ?? null,
+      height: r.height ?? null,
+      path: r.path ?? null,
+      transparent: r.transparent ?? null,
+      error: r.ok ? null : r.error?.message || (r.attempts || []).map((a) => a.message).filter(Boolean).join('; ') || '未知错误',
+    });
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  return {
+    ok: failed.length === 0,
+    verifyScope: scope,
+    total: results.length,
+    passed: results.length - failed.length,
+    failed: failed.length,
+    totalMs: Date.now() - startedAt,
+    results,
+    hint: 'verify 按矩阵逐条真实调用（1024² 小尺寸，按张计费）；失败项看 error',
+  };
+}
+
 async function runList() {
   const creds = readCredentials();
   const providers = Object.values(PROVIDERS).map((p) => {
@@ -816,6 +944,7 @@ async function runList() {
       keyMask: maskKey(key),
       keySource: source,
       models: p.models,
+      notes: p.notes || null,
       editModel: p.editModel || null,
       editModels: p.editModels || null,
       edit: p.edit,
@@ -861,6 +990,31 @@ async function main() {
   }
   if (opts.list) {
     process.stdout.write(JSON.stringify(await runList(), null, 2) + '\n');
+    return;
+  }
+  if (opts.verify) {
+    const scope = opts.verify === true ? 'fast' : String(opts.verify);
+    if (!['fast', 'all'].includes(scope)) errExit('--verify 只接受 fast 或 all\n\n' + USAGE, 2);
+    const result = await runVerify({
+      prompt: '',
+      aspect: '1:1',
+      size: null,
+      images: [],
+      transparent: false,
+      provider: 'auto',
+      quality: 'auto',
+      timeoutMs: DEFAULTS.timeoutMs,
+      timeoutExplicit: false,
+      retries: 0,
+      count: 1,
+      outDir: path.resolve(opts.out || DEFAULTS.outDir),
+      name: null,
+      model: null,
+      dryRun: Boolean(opts['dry-run']),
+      verifyScope: scope,
+    });
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    if (!result.ok) process.exit(1);
     return;
   }
 
