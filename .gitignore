@@ -1,0 +1,15 @@
+# 生成产物与本地临时文件
+image-gen-out/
+out/
+tmp/
+*.part
+
+# 依赖与系统文件
+node_modules/
+.DS_Store
+Thumbs.db
+
+# 本地密钥（绝不要提交）
+.credentials.yaml
+.env
+*.key
